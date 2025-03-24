@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Docker repository to fetch tags from
-REPO="kong/kong"
+REPO="kong/kong-gateway"
 URL="https://hub.docker.com/v2/repositories/$REPO/tags/"
 PAGE_SIZE=100
 FILTER=""
