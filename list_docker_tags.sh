@@ -9,14 +9,27 @@ FILTER=""
 LATEST_N=0
 OUTPUT_FILE=""
 JSON_OUTPUT=false
+SHOW_PROGRESS=true
+STABLE_ONLY=false
+VERBOSE=false
+
+# Colors for better readability
+RED="\033[0;31m"
+GREEN="\033[0;32m"
+YELLOW="\033[0;33m"
+CYAN="\033[0;36m"
+NC="\033[0m" # No color
 
 usage() {
-    echo "Usage: $0 [-f filter] [-n latest_n] [-j] [-o filename]"
-    echo "  -f, --filter filter     Only show tags matching the given filter (e.g., '3.5')"
-    echo "  -n, --latest latest_n   Show only the latest N tags"
-    echo "  -j, --json              Output results in JSON format"
-    echo "  -o, --output filename   Save results to the specified file"
-    echo "  -h, --help              Show this help message"
+    echo -e "${CYAN}Usage:${NC} $0 [options]"
+    echo "  -f, --filter filter      Only show tags matching the given filter (supports regex)"
+    echo "  -n, --latest latest_n    Show only the latest N tags"
+    echo "  -j, --json               Output results in JSON format"
+    echo "  -o, --output filename    Save results to the specified file"
+    echo "  -s, --stable             Show only stable (non-RC, non-beta) tags"
+    echo "  -q, --quiet              Hide progress indicator"
+    echo "  -v, --verbose            Show API call details for debugging"
+    echo "  -h, --help               Show this help message"
     exit 0
 }
 
@@ -27,28 +40,45 @@ while [[ $# -gt 0 ]]; do
         -n|--latest) LATEST_N="$2"; shift 2 ;;
         -j|--json) JSON_OUTPUT=true; shift ;;
         -o|--output) OUTPUT_FILE="$2"; shift 2 ;;
+        -s|--stable) STABLE_ONLY=true; shift ;;
+        -q|--quiet) SHOW_PROGRESS=false; shift ;;
+        -v|--verbose) VERBOSE=true; shift ;;
         -h|--help) usage ;;
-        *) echo "Unknown option: $1"; usage ;;
+        *) echo -e "${RED}Unknown option:${NC} $1"; usage ;;
     esac
 done
 
-echo "Fetching all tags for $REPO..."
+echo -e "${CYAN}Fetching tags for ${GREEN}$REPO${NC}..."
 
 TAGS_LIST=()
+FETCH_COUNT=0
 
 while true; do
+    # Show progress
+    $SHOW_PROGRESS && echo -ne "${YELLOW}Fetching page $PAGE...${NC}\r"
+
+    # API request
     RESPONSE=$(curl -s "$URL?page=$PAGE&page_size=$PAGE_SIZE")
+
+    # Debug mode: show raw API response
+    $VERBOSE && echo -e "\n${RED}DEBUG:${NC} $RESPONSE\n"
 
     # Extract tags and handle empty response
     TAGS=$(echo "$RESPONSE" | jq -r '.results[].name' 2>/dev/null)
     [ -z "$TAGS" ] && break
 
+    # Apply filters
     if [ -n "$FILTER" ]; then
-        TAGS=$(echo "$TAGS" | grep -i "$FILTER")
+        TAGS=$(echo "$TAGS" | grep -E -i "$FILTER")
+    fi
+
+    if $STABLE_ONLY; then
+        TAGS=$(echo "$TAGS" | grep -E -v '(rc|beta|alpha)')
     fi
 
     # Add to list
     TAGS_LIST+=($TAGS)
+    FETCH_COUNT=$((FETCH_COUNT + ${#TAGS[@]}))
 
     # Stop if no more pages
     NEXT=$(echo "$RESPONSE" | jq -r '.next')
@@ -57,7 +87,7 @@ while true; do
     PAGE=$((PAGE + 1))
 done
 
-# Ensure unique and sorted output
+# Sort results and remove duplicates
 TAGS_LIST=($(printf "%s\n" "${TAGS_LIST[@]}" | sort -Vu))
 
 # Show only the latest N if specified
@@ -65,19 +95,22 @@ if [ "$LATEST_N" -gt 0 ]; then
     TAGS_LIST=("${TAGS_LIST[@]:0:$LATEST_N}")
 fi
 
+# Final message
+echo -e "\n${GREEN}Fetched $FETCH_COUNT tags.${NC}"
+
 # Convert to JSON if requested
 if $JSON_OUTPUT; then
     JSON_RESULT=$(printf "%s\n" "${TAGS_LIST[@]}" | jq -R . | jq -s .)
     if [ -n "$OUTPUT_FILE" ]; then
         echo "$JSON_RESULT" > "$OUTPUT_FILE"
-        echo "Results saved to $OUTPUT_FILE (JSON format)"
+        echo -e "${CYAN}Results saved to ${GREEN}$OUTPUT_FILE${NC} (JSON format)"
     else
         echo "$JSON_RESULT"
     fi
 else
     # Print results normally
     if [ ${#TAGS_LIST[@]} -eq 0 ]; then
-        echo "No tags found matching your criteria."
+        echo -e "${RED}No tags found matching your criteria.${NC}"
     else
         printf "%s\n" "${TAGS_LIST[@]}"
     fi
@@ -85,7 +118,7 @@ else
     # Save to file if requested
     if [ -n "$OUTPUT_FILE" ]; then
         printf "%s\n" "${TAGS_LIST[@]}" > "$OUTPUT_FILE"
-        echo "Results saved to $OUTPUT_FILE"
+        echo -e "${CYAN}Results saved to ${GREEN}$OUTPUT_FILE${NC}"
     fi
 fi
 
@@ -147,3 +180,7 @@ fi
 
 # the filter and latest counter are still getting oldes to newest
 # still need to swap that 
+
+
+# still need to fix filtering, regex is a little off
+# the -v is pretty cool, 
