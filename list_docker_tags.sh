@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Example: ./list_docker_tags.sh -f "^3\.[0-9]+\.[0-9]+\.[0-9]+$" -s
+
+
 # Docker repository to fetch tags from
 REPO="kong/kong-gateway"
 URL="https://hub.docker.com/v2/repositories/$REPO/tags/"
