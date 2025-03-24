@@ -4,7 +4,6 @@
 REPO="kong/kong-gateway"
 URL="https://hub.docker.com/v2/repositories/$REPO/tags/"
 PAGE_SIZE=100
-PAGE=1
 FILTER=""
 LATEST_N=0
 OUTPUT_FILE=""
@@ -12,13 +11,14 @@ JSON_OUTPUT=false
 SHOW_PROGRESS=true
 STABLE_ONLY=false
 VERBOSE=false
+MAX_PARALLEL_REQUESTS=5  # Adjust based on system capabilities
 
-# Colors for better readability
+# Colors for readability
 RED="\033[0;31m"
 GREEN="\033[0;32m"
 YELLOW="\033[0;33m"
 CYAN="\033[0;36m"
-NC="\033[0m" # No color
+NC="\033[0m"  # No color
 
 usage() {
     echo -e "${CYAN}Usage:${NC} $0 [options]"
@@ -50,57 +50,42 @@ done
 
 echo -e "${CYAN}Fetching tags for ${GREEN}$REPO${NC}..."
 
-TAGS_LIST=()
-FETCH_COUNT=0
+# Get total number of pages
+TOTAL_PAGES=$(curl -s "$URL?page=1&page_size=$PAGE_SIZE" | jq -r '.count')
+TOTAL_PAGES=$(( (TOTAL_PAGES + PAGE_SIZE - 1) / PAGE_SIZE ))
 
-while true; do
-    # Show progress
-    $SHOW_PROGRESS && echo -ne "${YELLOW}Fetching page $PAGE...${NC}\r"
+# Debugging info
+$VERBOSE && echo -e "${YELLOW}Total pages to fetch: $TOTAL_PAGES${NC}"
 
-    # API request
-    RESPONSE=$(curl -s "$URL?page=$PAGE&page_size=$PAGE_SIZE")
+# Fetch all pages in parallel
+fetch_page() {
+    local page=$1
+    curl -s "$URL?page=$page&page_size=$PAGE_SIZE" | jq -r '.results[].name'
+}
 
-    # Debug mode: show raw API response
-    $VERBOSE && echo -e "\n${RED}DEBUG:${NC} $RESPONSE\n"
+export -f fetch_page
+export URL
+export PAGE_SIZE
 
-    # Extract tags and handle empty response
-    TAGS=$(echo "$RESPONSE" | jq -r '.results[].name' 2>/dev/null)
-    [ -z "$TAGS" ] && break
+TAGS_LIST=$(seq 1 $TOTAL_PAGES | xargs -I {} -P $MAX_PARALLEL_REQUESTS bash -c 'fetch_page "$@"' _ {} | sort -Vu)
 
-    # Apply filters
-    if [ -n "$FILTER" ]; then
-        TAGS=$(echo "$TAGS" | grep -E -i "$FILTER")
-    fi
+# Apply filters
+if [ -n "$FILTER" ]; then
+    TAGS_LIST=$(echo "$TAGS_LIST" | grep -E -i "$FILTER")
+fi
 
-    if $STABLE_ONLY; then
-        TAGS=$(echo "$TAGS" | grep -E -v '(rc|beta|alpha)')
-    fi
-
-    # Add to list
-    TAGS_LIST+=($TAGS)
-    FETCH_COUNT=$((FETCH_COUNT + ${#TAGS[@]}))
-
-    # Stop if no more pages
-    NEXT=$(echo "$RESPONSE" | jq -r '.next')
-    [ "$NEXT" == "null" ] && break
-
-    PAGE=$((PAGE + 1))
-done
-
-# Sort results and remove duplicates
-TAGS_LIST=($(printf "%s\n" "${TAGS_LIST[@]}" | sort -Vu))
+if $STABLE_ONLY; then
+    TAGS_LIST=$(echo "$TAGS_LIST" | grep -E -v '(rc|beta|alpha)')
+fi
 
 # Show only the latest N if specified
 if [ "$LATEST_N" -gt 0 ]; then
-    TAGS_LIST=("${TAGS_LIST[@]:0:$LATEST_N}")
+    TAGS_LIST=$(echo "$TAGS_LIST" | head -n "$LATEST_N")
 fi
-
-# Final message
-echo -e "\n${GREEN}Fetched $FETCH_COUNT tags.${NC}"
 
 # Convert to JSON if requested
 if $JSON_OUTPUT; then
-    JSON_RESULT=$(printf "%s\n" "${TAGS_LIST[@]}" | jq -R . | jq -s .)
+    JSON_RESULT=$(echo "$TAGS_LIST" | jq -R . | jq -s .)
     if [ -n "$OUTPUT_FILE" ]; then
         echo "$JSON_RESULT" > "$OUTPUT_FILE"
         echo -e "${CYAN}Results saved to ${GREEN}$OUTPUT_FILE${NC} (JSON format)"
@@ -109,15 +94,15 @@ if $JSON_OUTPUT; then
     fi
 else
     # Print results normally
-    if [ ${#TAGS_LIST[@]} -eq 0 ]; then
+    if [ -z "$TAGS_LIST" ]; then
         echo -e "${RED}No tags found matching your criteria.${NC}"
     else
-        printf "%s\n" "${TAGS_LIST[@]}"
+        echo "$TAGS_LIST"
     fi
 
     # Save to file if requested
     if [ -n "$OUTPUT_FILE" ]; then
-        printf "%s\n" "${TAGS_LIST[@]}" > "$OUTPUT_FILE"
+        echo "$TAGS_LIST" > "$OUTPUT_FILE"
         echo -e "${CYAN}Results saved to ${GREEN}$OUTPUT_FILE${NC}"
     fi
 fi
