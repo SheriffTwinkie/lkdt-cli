@@ -108,7 +108,8 @@ fi
 $VERBOSE && echo -e "${YELLOW}Total pages to fetch: $TOTAL_PAGES${NC}"
 
 # Fetch all pages in parallel
-TAGS_LIST=$(seq 1 $TOTAL_PAGES | xargs -I {} -P $MAX_PARALLEL_REQUESTS bash -c 'fetch_page "$@"' _ {} | sort -Vu)
+# Also now sorting in reverse so the output is newest to oldest versioning
+TAGS_LIST=$(seq 1 $TOTAL_PAGES | xargs -I {} -P $MAX_PARALLEL_REQUESTS bash -c 'fetch_page "$@"' _ {} | sort -Vru)
 
 # Apply filters
 if [ -n "$FILTER" ]; then
