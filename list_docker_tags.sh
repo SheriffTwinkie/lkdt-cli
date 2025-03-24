@@ -2,6 +2,8 @@
 
 # Example: ./list_docker_tags.sh -f "^3\.[0-9]+\.[0-9]+\.[0-9]+$" -s
 
+VERSION="1.0.0"
+
 # Docker repository to fetch tags from
 REPO="kong/kong-gateway"
 URL="https://hub.docker.com/v2/repositories/$REPO/tags/"
@@ -35,6 +37,7 @@ usage() {
     echo "  --sort asc|desc          Sort results in ascending or descending order (default: desc)"
     echo "  -q, --quiet              Hide progress indicator"
     echo "  -v, --verbose            Show API call details for debugging"
+    echo "  --version                Show script version"
     echo "  -h, --help               Show this help message"
     exit 0
 }
