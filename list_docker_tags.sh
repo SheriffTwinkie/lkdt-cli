@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Docker repository to fetch tags from
-REPO="kong/kong-gateway"
+REPO="kong/kong"
 URL="https://hub.docker.com/v2/repositories/$REPO/tags/"
 PAGE_SIZE=100
 FILTER=""
@@ -12,6 +12,8 @@ SHOW_PROGRESS=true
 STABLE_ONLY=false
 VERBOSE=false
 MAX_PARALLEL_REQUESTS=5  # Adjust based on system capabilities
+MAX_RETRIES=3  # Number of retries for network failures
+RETRY_DELAY=5  # Seconds to wait before retrying
 
 # Colors for readability
 RED="\033[0;31m"
@@ -50,23 +52,59 @@ done
 
 echo -e "${CYAN}Fetching tags for ${GREEN}$REPO${NC}..."
 
-# Get total number of pages
-TOTAL_PAGES=$(curl -s "$URL?page=1&page_size=$PAGE_SIZE" | jq -r '.count')
-TOTAL_PAGES=$(( (TOTAL_PAGES + PAGE_SIZE - 1) / PAGE_SIZE ))
-
-# Debugging info
-$VERBOSE && echo -e "${YELLOW}Total pages to fetch: $TOTAL_PAGES${NC}"
-
-# Fetch all pages in parallel
+# Function to make API requests with retries
 fetch_page() {
     local page=$1
-    curl -s "$URL?page=$page&page_size=$PAGE_SIZE" | jq -r '.results[].name'
+    local attempt=1
+    local response
+
+    while [[ $attempt -le $MAX_RETRIES ]]; do
+        response=$(curl -s --retry $MAX_RETRIES --retry-delay $RETRY_DELAY "$URL?page=$page&page_size=$PAGE_SIZE")
+
+        # Check if API returned valid JSON
+        if jq -e . <<<"$response" >/dev/null 2>&1; then
+            # Handle rate limiting (429 Too Many Requests)
+            if echo "$response" | jq -e 'select(.message=="Too Many Requests")' >/dev/null; then
+                echo -e "${YELLOW}Rate limited! Waiting $RETRY_DELAY seconds before retrying... (Attempt $attempt)${NC}"
+                sleep $RETRY_DELAY
+                ((attempt++))
+                continue
+            fi
+
+            # Extract tags if successful
+            echo "$response" | jq -r '.results[].name'
+            return
+        else
+            echo -e "${RED}Invalid response from Docker Hub (Attempt $attempt)${NC}"
+        fi
+
+        ((attempt++))
+        sleep $RETRY_DELAY
+    done
+
+    echo -e "${RED}Failed to fetch page $page after $MAX_RETRIES attempts.${NC}" >&2
+    return 1
 }
 
 export -f fetch_page
 export URL
 export PAGE_SIZE
+export MAX_RETRIES
+export RETRY_DELAY
 
+# Get total number of pages
+TOTAL_COUNT=$(curl -s "$URL?page=1&page_size=$PAGE_SIZE" | jq -r '.count // 0')
+TOTAL_PAGES=$(( (TOTAL_COUNT + PAGE_SIZE - 1) / PAGE_SIZE ))
+
+if [[ $TOTAL_COUNT -eq 0 ]]; then
+    echo -e "${RED}No tags found or API request failed.${NC}"
+    exit 1
+fi
+
+# Debugging info
+$VERBOSE && echo -e "${YELLOW}Total pages to fetch: $TOTAL_PAGES${NC}"
+
+# Fetch all pages in parallel
 TAGS_LIST=$(seq 1 $TOTAL_PAGES | xargs -I {} -P $MAX_PARALLEL_REQUESTS bash -c 'fetch_page "$@"' _ {} | sort -Vu)
 
 # Apply filters
@@ -106,6 +144,7 @@ else
         echo -e "${CYAN}Results saved to ${GREEN}$OUTPUT_FILE${NC}"
     fi
 fi
+
 
 
 
