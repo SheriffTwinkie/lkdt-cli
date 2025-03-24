@@ -72,13 +72,17 @@ fetch_page() {
     while [[ $attempt -le $MAX_RETRIES ]]; do
         response=$(curl -s --retry $MAX_RETRIES --retry-delay $RETRY_DELAY "$URL?page=$page&page_size=$PAGE_SIZE")
 
+        # check if API returned valid JSON
         if jq -e . <<<"$response" >/dev/null 2>&1; then
+            # Handle rate limiting (429 Too Many Requests)
             if echo "$response" | jq -e 'select(.message=="Too Many Requests")' >/dev/null; then
                 echo -e "${YELLOW}Rate limited! Waiting $RETRY_DELAY seconds before retrying... (Attempt $attempt)${NC}"
                 sleep $RETRY_DELAY
                 ((attempt++))
                 continue
             fi
+
+            # Extract tags if successful
             echo "$response" | jq -r '.results[].name'
             return
         else
@@ -99,6 +103,7 @@ export PAGE_SIZE
 export MAX_RETRIES
 export RETRY_DELAY
 
+# Get total number of pages
 TOTAL_COUNT=$(curl -s "$URL?page=1&page_size=$PAGE_SIZE" | jq -r '.count // 0')
 TOTAL_PAGES=$(( (TOTAL_COUNT + PAGE_SIZE - 1) / PAGE_SIZE ))
 
@@ -107,6 +112,7 @@ if [[ $TOTAL_COUNT -eq 0 ]]; then
     exit 1
 fi
 
+# Debugging info
 $VERBOSE && echo -e "${YELLOW}Total pages to fetch: $TOTAL_PAGES${NC}"
 
 SORT_FLAG="-Vru"
@@ -114,8 +120,11 @@ if ! $SORT_DESC; then
     SORT_FLAG="-Vu"
 fi
 
+# Fetch all pages in parallel
+# Also now sorting in reverse so the output is newest to oldest versioning
 TAGS_LIST=$(seq 1 $TOTAL_PAGES | xargs -I {} -P $MAX_PARALLEL_REQUESTS bash -c 'fetch_page "$@"' _ {} | sort $SORT_FLAG)
 
+# Apply filters
 if [ -n "$FILTER" ]; then
     TAGS_LIST=$(echo "$TAGS_LIST" | grep -E -i "$FILTER")
 fi
@@ -124,10 +133,12 @@ if $STABLE_ONLY; then
     TAGS_LIST=$(echo "$TAGS_LIST" | grep -E -v '(rc|beta|alpha)')
 fi
 
+# Show only the latest N if specified
 if [ "$LATEST_N" -gt 0 ]; then
     TAGS_LIST=$(echo "$TAGS_LIST" | head -n "$LATEST_N")
 fi
 
+# Convert to JSON if requested
 if $JSON_OUTPUT; then
     JSON_RESULT=$(echo "$TAGS_LIST" | jq -R . | jq -s .)
     if [ -n "$OUTPUT_FILE" ]; then
@@ -137,12 +148,14 @@ if $JSON_OUTPUT; then
         echo "$JSON_RESULT"
     fi
 else
+    # Print results normally
     if [ -z "$TAGS_LIST" ]; then
         echo -e "${RED}No tags found matching your criteria.${NC}"
     else
         echo "$TAGS_LIST"
     fi
-
+    
+    # Save to file if requested
     if [ -n "$OUTPUT_FILE" ]; then
         echo "$TAGS_LIST" > "$OUTPUT_FILE"
         echo -e "${CYAN}Results saved to ${GREEN}$OUTPUT_FILE${NC}"
