@@ -1,27 +1,34 @@
 #!/bin/bash
 
 # Docker repository to fetch tags from
-REPO="kong/kong"
+REPO="kong/kong-gateway"
 URL="https://hub.docker.com/v2/repositories/$REPO/tags/"
 PAGE_SIZE=100
 PAGE=1
 FILTER=""
 LATEST_N=0
+OUTPUT_FILE=""
+JSON_OUTPUT=false
 
 usage() {
-    echo "Usage: $0 [-f filter] [-n latest_n]"
-    echo "  -f filter      Only show tags matching the given filter (e.g., '3.5')"
-    echo "  -n latest_n    Show only the latest N tags"
-    echo "  -h             Show this help message"
+    echo "Usage: $0 [-f filter] [-n latest_n] [-j] [-o filename]"
+    echo "  -f, --filter filter     Only show tags matching the given filter (e.g., '3.5')"
+    echo "  -n, --latest latest_n   Show only the latest N tags"
+    echo "  -j, --json              Output results in JSON format"
+    echo "  -o, --output filename   Save results to the specified file"
+    echo "  -h, --help              Show this help message"
     exit 0
 }
 
-while getopts ":f:n:h" opt; do
-    case $opt in
-        f) FILTER="$OPTARG" ;;
-        n) LATEST_N="$OPTARG" ;;
-        h) usage ;;
-        *) usage ;;
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -f|--filter) FILTER="$2"; shift 2 ;;
+        -n|--latest) LATEST_N="$2"; shift 2 ;;
+        -j|--json) JSON_OUTPUT=true; shift ;;
+        -o|--output) OUTPUT_FILE="$2"; shift 2 ;;
+        -h|--help) usage ;;
+        *) echo "Unknown option: $1"; usage ;;
     esac
 done
 
@@ -31,11 +38,11 @@ TAGS_LIST=()
 
 while true; do
     RESPONSE=$(curl -s "$URL?page=$PAGE&page_size=$PAGE_SIZE")
-    
+
     # Extract tags and handle empty response
     TAGS=$(echo "$RESPONSE" | jq -r '.results[].name' 2>/dev/null)
     [ -z "$TAGS" ] && break
-    
+
     if [ -n "$FILTER" ]; then
         TAGS=$(echo "$TAGS" | grep -i "$FILTER")
     fi
@@ -58,11 +65,28 @@ if [ "$LATEST_N" -gt 0 ]; then
     TAGS_LIST=("${TAGS_LIST[@]:0:$LATEST_N}")
 fi
 
-# Print results
-if [ ${#TAGS_LIST[@]} -eq 0 ]; then
-    echo "No tags found matching your criteria."
+# Convert to JSON if requested
+if $JSON_OUTPUT; then
+    JSON_RESULT=$(printf "%s\n" "${TAGS_LIST[@]}" | jq -R . | jq -s .)
+    if [ -n "$OUTPUT_FILE" ]; then
+        echo "$JSON_RESULT" > "$OUTPUT_FILE"
+        echo "Results saved to $OUTPUT_FILE (JSON format)"
+    else
+        echo "$JSON_RESULT"
+    fi
 else
-    printf "%s\n" "${TAGS_LIST[@]}"
+    # Print results normally
+    if [ ${#TAGS_LIST[@]} -eq 0 ]; then
+        echo "No tags found matching your criteria."
+    else
+        printf "%s\n" "${TAGS_LIST[@]}"
+    fi
+
+    # Save to file if requested
+    if [ -n "$OUTPUT_FILE" ]; then
+        printf "%s\n" "${TAGS_LIST[@]}" > "$OUTPUT_FILE"
+        echo "Results saved to $OUTPUT_FILE"
+    fi
 fi
 
 
@@ -114,3 +138,12 @@ fi
 
 
 
+# filter still a little off 
+# either not working or giving back checksum/UUIDs
+# json kinda works, gives brackets which im not sure is correct?
+# no open/close {}
+# file output save works just fine 
+# help menu works
+
+# the filter and latest counter are still getting oldes to newest
+# still need to swap that 
