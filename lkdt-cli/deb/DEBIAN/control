@@ -1,0 +1,8 @@
+Package: lkdt
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: all
+Depends: bash, curl, jq, coreutils
+Maintainer: Declan DeVito <declan.devito@konghq.com>
+Description: A CLI tool to list Docker Hub tags for Kong Gateway.
