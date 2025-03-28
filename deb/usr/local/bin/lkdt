@@ -59,7 +59,7 @@ while [[ $# -gt 0 ]]; do
             shift 2 ;;
         -q|--quiet) SHOW_PROGRESS=false; shift ;;
         -v|--verbose) VERBOSE=true; shift ;;
-        --version) echo "ltd version $VERSION"; exit 0 ;;
+        --version) echo "lkdt version $VERSION"; exit 0 ;;
         -h|--help) usage ;;
         *) echo -e "${RED}Unknown option:${NC} $1"; usage ;;
     esac
